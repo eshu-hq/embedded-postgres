@@ -10,7 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"github.com/lib/pq"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 const (
@@ -76,12 +76,11 @@ func defaultCreateDatabase(port uint32, username, password, database string) (er
 		return nil
 	}
 
-	conn, err := openDatabaseConnection(port, username, password, "postgres")
+	db, err := openDatabaseConnection(port, username, password, "postgres")
 	if err != nil {
 		return errorCustomDatabase(database, err)
 	}
 
-	db := sql.OpenDB(conn)
 	defer func() {
 		err = connectionClose(db, err)
 	}()
@@ -138,12 +137,11 @@ func healthCheckDatabaseOrTimeout(config Config) error {
 }
 
 func healthCheckDatabase(port uint32, database, username, password string) (err error) {
-	conn, err := openDatabaseConnection(port, username, password, database)
+	db, err := openDatabaseConnection(port, username, password, database)
 	if err != nil {
 		return err
 	}
 
-	db := sql.OpenDB(conn)
 	defer func() {
 		err = connectionClose(db, err)
 	}()
@@ -155,17 +153,20 @@ func healthCheckDatabase(port uint32, database, username, password string) (err 
 	return nil
 }
 
-func openDatabaseConnection(port uint32, username string, password string, database string) (*pq.Connector, error) {
-	conn, err := pq.NewConnector(fmt.Sprintf("host=localhost port=%d user=%s password=%s dbname=%s sslmode=disable",
+// openDatabaseConnection opens a connection over the pgx stdlib driver.
+//
+// This library previously used github.com/lib/pq here. That module is in
+// maintenance mode and, as of 2026, carries five advisories with no upstream
+// fix (GO-2026-6166, -6168, -6170, -6171, -6172). Importing it registered its
+// driver in every binary that linked this package, so those advisories were
+// reachable through database/sql's runtime driver lookup even for callers that
+// never opened a "postgres" connection.
+func openDatabaseConnection(port uint32, username string, password string, database string) (*sql.DB, error) {
+	return sql.Open("pgx", fmt.Sprintf("host=localhost port=%d user=%s password=%s dbname=%s sslmode=disable",
 		port,
 		username,
 		password,
 		database))
-	if err != nil {
-		return nil, err
-	}
-
-	return conn, nil
 }
 
 func errorCustomDatabase(database string, err error) error {
